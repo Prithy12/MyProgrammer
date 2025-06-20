@@ -129,6 +129,33 @@ The application uses a single `Conversation` table with the following structure:
 |----------|-------------|----------|
 | `OPENAI_API_KEY` | Your OpenAI API key | Yes |
 | `DATABASE_URL` | PostgreSQL connection string | Yes |
+| `DEBUG` | Enable debug mode (true/false) | No (default: false) |
+
+## 🔐 Security Considerations
+
+### Environment Variables
+- **Never commit your `.env` file** - it's already in `.gitignore`
+- Use strong, unique passwords for production databases
+- Rotate API keys regularly
+- Consider using a secrets management service for production
+
+### Database Security
+- The default PostgreSQL password in `docker-compose.yml` is for development only
+- Use strong passwords and proper authentication in production
+- Enable SSL/TLS for database connections in production
+- Consider using connection pooling for better performance
+
+### API Security
+- The application runs on `0.0.0.0:8000` by default (accessible from any IP)
+- For production, consider using a reverse proxy (nginx, Apache)
+- Implement proper CORS policies for production
+- Add rate limiting for API endpoints
+
+### Development vs Production
+- Debug mode is disabled by default (`DEBUG=false`)
+- Enable debug mode only for development: `DEBUG=true`
+- Use different database credentials for development and production
+- Consider using environment-specific configuration files
 
 ## 🐳 Docker Deployment
 
