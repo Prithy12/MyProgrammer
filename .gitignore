@@ -1,0 +1,4 @@
+# these are things to ignore from within the codebase
+.env
+.venv
+__pycache__

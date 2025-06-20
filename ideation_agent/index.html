@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ideation Agent UI</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; background: #f5f5f5; }
+    textarea { width: 100%; height: 80px; font-family: inherit; padding: 10px; border-radius: 4px; border: 1px solid #ccc; }
+    .controls { margin: 10px 0; }
+    button { margin: 5px 4px 5px 0; padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    button:hover:not(:disabled) { background: #0056b3; }
+    #conversation { margin-top: 20px; border: 1px solid #ccc; padding: 15px; max-height: 500px; overflow-y: auto; border-radius: 5px; background: white; }
+    .step { margin-bottom: 20px; }
+    .step-header { font-weight: bold; text-transform: uppercase; margin-bottom: 5px; }
+    .subdomain-header { font-weight: bold; color: #2c5aa0; margin-top: 15px; margin-bottom: 8px; font-size: 1.05em; border-bottom: 1px solid #eee; padding-bottom: 3px; }
+    .requirement-item { display: flex; align-items: flex-start; margin: 5px 0 5px 20px; }
+    .requirement-id { font-weight: bold; color: #666; margin-right: 8px; }
+    .requirement-text { flex: 1; }
+    .refine-btn { background: #28a745; margin-left: 8px; }
+    .summary-text { background: #fff; padding: 5px; border: 1px solid #ddd; border-radius: 4px; }
+    .context-text { background: #f8f9fa; padding: 10px; border-left: 3px solid #007bff; margin-top: 8px; white-space: pre-wrap; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Ideation Agent</h1>
+  <div class="controls">
+    <textarea id="ideaInput" placeholder="Enter raw idea here..."></textarea>
+    <br />
+    <button id="startBtn">Start Ideation</button>
+    <button id="enrichBtn" disabled>Enrich Context</button>
+    <button id="draftBtn" disabled>Draft Requirements</button>
+  </div>
+
+  <div class="controls">
+    <button id="saveBtn">Save Conversation</button>
+    <select id="loadSelect"><option value="">--Select Conversation--</option></select>
+    <button id="loadBtn">Load Conversation</button>
+  </div>
+
+  <div id="conversation"></div>
+
+  <script>
+    const startBtn = document.getElementById('startBtn');
+    const enrichBtn = document.getElementById('enrichBtn');
+    const draftBtn = document.getElementById('draftBtn');
+    const saveBtn = document.getElementById('saveBtn');
+    const loadBtn = document.getElementById('loadBtn');
+    const loadSelect = document.getElementById('loadSelect');
+    const ideaInput = document.getElementById('ideaInput');
+    const convDiv = document.getElementById('conversation');
+
+    let conversation = { summary: '', context: '', draft: null };
+
+    async function callEndpoint(path, payload) {
+      const res = await fetch(`http://127.0.0.1:8000${path}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      return res.json();
+    }
+
+    function formatRequirements(draft) {
+      let html = '';
+      draft.subdomains.forEach(subdomain => {
+        const reqs = draft.requirements.filter(r => r.subdomain === subdomain);
+        if (!reqs.length) return;
+        html += `<div class="subdomain-header">${subdomain}</div>`;
+        reqs.forEach(r => {
+          html += `<div class="requirement-item">` +
+                   `<span class="requirement-id">${r.id}:</span>` +
+                   `<span class="requirement-text" id="text-${r.id}" contenteditable="true">${r.text}</span>` +
+                   `<button class="refine-btn" data-id="${r.id}" data-subdomain="${subdomain}">Refine</button>` +
+                   `</div>`;
+        });
+      });
+      return html;
+    }
+
+    function attachEditHandlers() {
+      const summaryEl = document.getElementById('summary-text');
+      if (summaryEl) summaryEl.oninput = () => { conversation.summary = summaryEl.innerText; };
+      const contextEl = document.getElementById('context-text');
+      if (contextEl) contextEl.oninput = () => { conversation.context = contextEl.innerText; };
+      document.querySelectorAll('.requirement-text').forEach(span => {
+        span.oninput = () => {
+          const id = span.id.split('-')[1];
+          const req = conversation.draft.requirements.find(r => r.id === id);
+          if (req) req.text = span.innerText;
+        };
+      });
+    }
+
+    function attachRefineHandlers() {
+      document.querySelectorAll('.refine-btn').forEach(btn => {
+        btn.onclick = async () => {
+          btn.disabled = true; btn.textContent = 'Refining...';
+          const id = btn.dataset.id;
+          const subdomain = btn.dataset.subdomain;
+          const text = document.getElementById(`text-${id}`).innerText;
+          const res = await callEndpoint('/ideate/refine', { id, subdomain, text });
+          const span = document.getElementById(`text-${id}`);
+          span.innerText = res.text;
+          const req = conversation.draft.requirements.find(r => r.id === id);
+          if (req) req.text = res.text;
+          btn.textContent = 'Refine'; btn.disabled = false;
+        };
+      });
+    }
+
+    function render() {
+      convDiv.innerHTML = '';
+      if (conversation.summary) {
+        convDiv.innerHTML += `<div class="step"><div class="step-header">Summary</div>` +
+                             `<div id="summary-text" class="summary-text" contenteditable="true">${conversation.summary}</div></div>`;
+      }
+      if (conversation.context) {
+        convDiv.innerHTML += `<div class="step"><div class="step-header">Context Analysis</div>` +
+                             `<div id="context-text" class="context-text" contenteditable="true">${conversation.context}</div></div>`;
+      }
+      if (conversation.draft) {
+        convDiv.innerHTML += `<div class="step"><div class="step-header">Project Requirements</div>` + formatRequirements(conversation.draft) + `</div>`;
+      }
+      attachRefineHandlers(); attachEditHandlers();
+    }
+
+    // Update load options from DB
+    function updateLoadOptions() {
+      loadSelect.innerHTML = '<option value="">--Select Conversation--</option>';
+      fetch('http://127.0.0.1:8000/ideate/list')
+        .then(res => res.json())
+        .then(sessions => {
+          sessions.forEach(session => {
+            const opt = document.createElement('option');
+            opt.value = session.id;
+            opt.textContent = session.name;
+            loadSelect.appendChild(opt);
+          });
+        })
+        .catch(err => console.error('Failed to load sessions:', err));
+    }
+
+    // Event handlers
+    startBtn.onclick = async () => {
+      const text = ideaInput.value.trim(); if (!text) return;
+      const res = await callEndpoint('/ideate/start', { text });
+      conversation = { summary: res.summary, context: '', draft: null };
+      enrichBtn.disabled = false; draftBtn.disabled = true; render();
+    };
+    enrichBtn.onclick = async () => {
+      const res = await callEndpoint('/ideate/enrich', { summary: conversation.summary });
+      conversation.context = res.context; draftBtn.disabled = false; render();
+    };
+    draftBtn.onclick = async () => {
+      const res = await callEndpoint('/ideate/draft', { summary: conversation.summary, context: conversation.context });
+      conversation.draft = res; render();
+    };
+    saveBtn.onclick = () => {
+      (async () => {
+        const name = prompt('Enter a name for this conversation:'); if (!name) return;
+        try {
+          const res = await fetch('http://127.0.0.1:8000/ideate/save', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ name, summary: conversation.summary, context: conversation.context, draft: conversation.draft })
+          });
+          const data = await res.json();
+          alert('Saved with id: ' + data.id);
+          updateLoadOptions();
+        } catch (e) {
+          console.error('Save failed:', e);
+          alert('Save failed. See console.');
+        }
+      })();
+    };
+    loadBtn.onclick = () => {
+      (async () => {
+        const id = loadSelect.value; if (!id) return;
+        try {
+          const res = await fetch(`http://127.0.0.1:8000/ideate/load/${id}`);
+          const data = await res.json();
+          conversation = { summary: data.summary, context: data.context, draft: data.draft };
+          enrichBtn.disabled = !conversation.summary;
+          draftBtn.disabled = !conversation.context;
+          render();
+        } catch (e) {
+          console.error('Load failed:', e);
+          alert('Load failed. See console.');
+        }
+      })();
+    };
+
+    // Initialize load options
+    updateLoadOptions();
+  </script>
+</body>
+</html>
